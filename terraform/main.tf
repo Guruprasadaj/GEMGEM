@@ -3,62 +3,28 @@ provider "aws" {
   region = var.aws_region
 }
 
-# Data source for AZs
-data "aws_availability_zones" "available" {
-  state = "available"
-}
-
 # Use existing VPC
 data "aws_vpc" "existing" {
   id = "vpc-0f3668f84f0c7b8df"
 }
 
-# Create our own subnets instead of trying to find existing ones
-resource "aws_subnet" "public" {
-  count                   = 2
-  vpc_id                  = data.aws_vpc.existing.id
-  cidr_block              = "10.0.${count.index + 1}.0/24"
-  availability_zone       = data.aws_availability_zones.available.names[count.index]
-  map_public_ip_on_launch = true
-  
-  tags = {
-    Name = "${var.project_name}-public-subnet-${count.index + 1}"
+# Find ALL existing subnets in the VPC
+data "aws_subnets" "existing" {
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.existing.id]
   }
 }
 
-# Internet Gateway
-resource "aws_internet_gateway" "main" {
-  vpc_id = data.aws_vpc.existing.id
-  
-  tags = {
-    Name = "${var.project_name}-igw"
-  }
+# Get subnet details
+data "aws_subnet" "selected" {
+  for_each = toset(slice(data.aws_subnets.existing.ids, 0, 2))
+  id       = each.value
 }
 
-# Route Table
-resource "aws_route_table" "public" {
-  vpc_id = data.aws_vpc.existing.id
-  
-  route {
-    cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.main.id
-  }
-  
-  tags = {
-    Name = "${var.project_name}-public-route-table"
-  }
-}
-
-# Route Table Association
-resource "aws_route_table_association" "public" {
-  count          = 2
-  subnet_id      = aws_subnet.public[count.index].id
-  route_table_id = aws_route_table.public.id
-}
-
-# Security Groups
+# Use existing security group or create if it doesn't exist
 resource "aws_security_group" "ecs" {
-  name        = "${var.project_name}-ecs"
+  name        = "${var.project_name}-ecs-new"  # Changed name to avoid conflict
   description = "ECS security group"
   vpc_id      = data.aws_vpc.existing.id
 
@@ -79,9 +45,9 @@ resource "aws_security_group" "ecs" {
 
 # RDS Security Group
 resource "aws_security_group" "rds_sg" {
-  name        = "${var.project_name}-rds-sg"
+  name        = "${var.project_name}-rds-sg-new"  # Changed name to avoid conflict
   description = "Security group for RDS"
-  vpc_id      = data.aws_vpc.existing.id # FIX: Use existing VPC
+  vpc_id      = data.aws_vpc.existing.id
 
   ingress {
     from_port       = 3306
@@ -100,9 +66,9 @@ resource "aws_security_group" "rds_sg" {
 
 # EFS Security Group
 resource "aws_security_group" "efs_sg" {
-  name        = "${var.project_name}-efs-sg"
+  name        = "${var.project_name}-efs-sg-new"  # Changed name to avoid conflict
   description = "Security group for EFS"
-  vpc_id      = data.aws_vpc.existing.id # FIX: Use existing VPC
+  vpc_id      = data.aws_vpc.existing.id
 
   ingress {
     from_port       = 2049
@@ -117,6 +83,11 @@ resource "aws_security_group" "efs_sg" {
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
+}
+
+# Use local variable to get subnet IDs in a usable format
+locals {
+  subnet_ids = [for s in data.aws_subnet.selected : s.id]
 }
 
 # ECS Cluster
@@ -169,11 +140,6 @@ resource "aws_launch_template" "ecs" {
   iam_instance_profile {
     name = aws_iam_instance_profile.ecs_profile.name
   }
-}
-
-# Get subnet IDs from data source
-locals {
-  subnet_ids = [for s in aws_subnet.public : s.id]
 }
 
 # Auto Scaling Group
