@@ -8,9 +8,17 @@ data "aws_availability_zones" "available" {
   state = "available"
 }
 
-# Use existing VPC instead of creating new one
+# Use existing VPC
 data "aws_vpc" "existing" {
   id = "vpc-0f3668f84f0c7b8df"
+}
+
+# Use existing subnets
+data "aws_subnets" "existing" {
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.existing.id]
+  }
 }
 
 # VPC Configuration
@@ -80,20 +88,14 @@ resource "aws_route_table_association" "public" {
 }
 
 # Security Groups
-resource "aws_security_group" "ecs_sg" {
-  vpc_id = data.aws_vpc.existing.id
-  name   = "gemgem-ecs-sg-${random_string.suffix.result}"
+resource "aws_security_group" "ecs" {
+  name        = "gemgem-ecs"
+  description = "ECS security group"
+  vpc_id      = data.aws_vpc.existing.id
 
   ingress {
     from_port   = 80
     to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    from_port   = 443
-    to_port     = 443
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
@@ -116,13 +118,13 @@ resource "aws_security_group" "rds_sg" {
     from_port       = 3306
     to_port         = 3306
     protocol        = "tcp"
-    security_groups = [aws_security_group.ecs_sg.id]
+    security_groups = [aws_security_group.ecs.id]
   }
 }
 
 # ECS Cluster
 resource "aws_ecs_cluster" "main" {
-  name = "${var.project_name}-cluster"
+  name = "gemgem-cluster"
 }
 
 # ECS Launch Template
@@ -137,7 +139,7 @@ resource "aws_launch_template" "ecs" {
               EOF
   )
 
-  vpc_security_group_ids = [aws_security_group.ecs_sg.id]
+  vpc_security_group_ids = [aws_security_group.ecs.id]
 
   iam_instance_profile {
     name = aws_iam_instance_profile.ecs_profile.name
@@ -221,7 +223,7 @@ resource "aws_efs_mount_target" "main" {
   count           = length(aws_subnet.private)
   file_system_id  = aws_efs_file_system.main.id
   subnet_id       = aws_subnet.private[count.index].id
-  security_groups = [aws_security_group.ecs_sg.id]
+  security_groups = [aws_security_group.ecs.id]
 }
 
 # CloudFront Origin Access Identity
@@ -297,15 +299,15 @@ resource "aws_iam_instance_profile" "ecs_profile" {
 }
 
 # ECS Task Definition
-resource "aws_ecs_task_definition" "main" {
-  family                   = "${var.project_name}-task"
+resource "aws_ecs_task_definition" "app" {
+  family                   = "gemgem"
   requires_compatibilities = ["EC2"]
-  network_mode             = "bridge"
-
+  network_mode            = "bridge"
+  
   container_definitions = jsonencode([
     {
-      name      = "${var.project_name}-container"
-      image     = "${var.project_name}:latest"
+      name      = "gemgem"
+      image     = "${aws_ecr_repository.app.repository_url}:latest"
       cpu       = 256
       memory    = 512
       essential = true
@@ -313,7 +315,6 @@ resource "aws_ecs_task_definition" "main" {
         {
           containerPort = 80
           hostPort      = 80
-          protocol      = "tcp"
         }
       ]
     }
@@ -322,13 +323,10 @@ resource "aws_ecs_task_definition" "main" {
 
 # ECS Service
 resource "aws_ecs_service" "main" {
-  name            = "gemgem-service-${random_string.suffix.result}"
+  name            = "gemgem-service"
   cluster         = aws_ecs_cluster.main.id
-  task_definition = aws_ecs_task_definition.main.arn
-  desired_count   = 2
-
-  deployment_minimum_healthy_percent = 50
-  deployment_maximum_percent         = 200
+  task_definition = aws_ecs_task_definition.app.arn
+  desired_count   = 1
 }
 
 resource "aws_s3_bucket" "static" {
@@ -344,12 +342,8 @@ resource "random_string" "suffix" {
 
 # Create ECR Repository
 resource "aws_ecr_repository" "app" {
-  name                 = "gemgem-${random_string.suffix.result}"
-  image_tag_mutability = "MUTABLE"
-
-  image_scanning_configuration {
-    scan_on_push = true
-  }
+  name         = "gemgem"
+  force_delete = true
 }
 
 # Add ECR Repository Policy
