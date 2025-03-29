@@ -8,6 +8,11 @@ data "aws_availability_zones" "available" {
   state = "available"
 }
 
+# Use existing VPC instead of creating new one
+data "aws_vpc" "existing" {
+  id = "vpc-0f3668f84f0c7b8df"
+}
+
 # VPC Configuration
 resource "aws_vpc" "main" {
   cidr_block           = "10.0.0.0/16"
@@ -30,22 +35,19 @@ resource "aws_internet_gateway" "main" {
 
 # Public Subnets
 resource "aws_subnet" "public" {
-  vpc_id                  = aws_vpc.main.id
-  cidr_block              = "10.0.1.0/24"
+  count                   = 2
+  vpc_id                 = data.aws_vpc.existing.id
+  cidr_block             = count.index == 0 ? "10.0.1.0/24" : "10.0.2.0/24"
+  availability_zone      = count.index == 0 ? "us-east-1a" : "us-east-1b"
   map_public_ip_on_launch = true
-  availability_zone       = "us-east-1a"
 }
 
 # Private Subnets
 resource "aws_subnet" "private" {
   count             = 2
-  vpc_id            = aws_vpc.main.id
-  cidr_block        = "10.0.${count.index + 10}.0/24"
-  availability_zone = data.aws_availability_zones.available.names[count.index]
-
-  tags = {
-    Name = "${var.project_name}-private-${count.index + 1}"
-  }
+  vpc_id            = data.aws_vpc.existing.id
+  cidr_block        = count.index == 0 ? "10.0.3.0/24" : "10.0.4.0/24"
+  availability_zone = count.index == 0 ? "us-east-1a" : "us-east-1b"
 }
 
 # Route Table for Public Subnets
@@ -72,7 +74,7 @@ resource "aws_route_table_association" "public" {
 resource "aws_security_group" "ecs_sg" {
   name        = "${var.project_name}-ecs-sg"
   description = "Security group for ECS instances"
-  vpc_id      = aws_vpc.main.id
+  vpc_id      = data.aws_vpc.existing.id
 
   ingress {
     from_port   = 80
