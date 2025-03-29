@@ -74,7 +74,8 @@ resource "aws_route_table" "public" {
 
 # Route Table Association for Public Subnets
 resource "aws_route_table_association" "public" {
-  subnet_id      = aws_subnet.public.id
+  count          = 2
+  subnet_id      = aws_subnet.public[count.index].id
   route_table_id = aws_route_table.public.id
 }
 
@@ -145,11 +146,13 @@ resource "aws_launch_template" "ecs" {
 
 # Auto Scaling Group
 resource "aws_autoscaling_group" "ecs" {
-  name                = "ecs-asg"
-  vpc_zone_identifier = [aws_subnet.public.id]
-  min_size            = 1
-  max_size            = 1
-  desired_capacity    = 1
+  name                = "gemgem-asg-${random_string.suffix.result}"
+  vpc_zone_identifier = aws_subnet.public[*].id  # This syntax gets all public subnet IDs
+  target_group_arns   = [aws_lb_target_group.ecs.arn]
+  health_check_type   = "EC2"
+  min_size           = 1
+  max_size           = 4
+  desired_capacity   = 2
 
   launch_template {
     id      = aws_launch_template.ecs.id
@@ -158,7 +161,7 @@ resource "aws_autoscaling_group" "ecs" {
 
   tag {
     key                 = "Name"
-    value               = "ecs-instance"
+    value               = "gemgem-ecs-instance"
     propagate_at_launch = true
   }
 }
