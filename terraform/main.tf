@@ -36,10 +36,14 @@ resource "aws_internet_gateway" "main" {
 # Public Subnets
 resource "aws_subnet" "public" {
   count                   = 2
-  vpc_id                 = data.aws_vpc.existing.id
-  cidr_block             = count.index == 0 ? "10.0.1.0/24" : "10.0.2.0/24"
-  availability_zone      = count.index == 0 ? "us-east-1a" : "us-east-1b"
+  vpc_id                  = data.aws_vpc.existing.id
+  cidr_block              = count.index == 0 ? "10.0.1.0/24" : "10.0.2.0/24"
+  availability_zone       = count.index == 0 ? "us-east-1a" : "us-east-1b"
   map_public_ip_on_launch = true
+
+  tags = {
+    Name = "gemgem-public-${count.index + 1}"
+  }
 }
 
 # Private Subnets
@@ -48,6 +52,10 @@ resource "aws_subnet" "private" {
   vpc_id            = data.aws_vpc.existing.id
   cidr_block        = count.index == 0 ? "10.0.3.0/24" : "10.0.4.0/24"
   availability_zone = count.index == 0 ? "us-east-1a" : "us-east-1b"
+
+  tags = {
+    Name = "gemgem-private-${count.index + 1}"
+  }
 }
 
 # Route Table for Public Subnets
@@ -72,9 +80,8 @@ resource "aws_route_table_association" "public" {
 
 # Security Groups
 resource "aws_security_group" "ecs_sg" {
-  name        = "${var.project_name}-ecs-sg"
-  description = "Security group for ECS instances"
-  vpc_id      = data.aws_vpc.existing.id
+  vpc_id = data.aws_vpc.existing.id
+  name   = "gemgem-ecs-sg-${random_string.suffix.result}"
 
   ingress {
     from_port   = 80
