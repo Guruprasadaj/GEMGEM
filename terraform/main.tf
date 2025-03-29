@@ -14,14 +14,15 @@ data "aws_vpc" "existing" {
 }
 
 # Use existing subnets
-data "aws_subnets" "public" {
+data "aws_subnet" "public" {
+  count = 2
   filter {
     name   = "vpc-id"
     values = [data.aws_vpc.existing.id]
   }
   filter {
-    name   = "map-public-ip-on-launch"
-    values = ["true"]
+    name   = "availability-zone"
+    values = ["us-east-1${count.index == 0 ? "a" : "b"}"]
   }
 }
 
@@ -336,9 +337,9 @@ resource "aws_ecs_task_definition" "app" {
   ])
 }
 
-# ECS Service
+# ECS Service with unique name
 resource "aws_ecs_service" "main" {
-  name            = "gemgem-service"
+  name            = "gemgem-service-${formatdate("YYYYMMDD-hhmmss", timestamp())}"
   cluster         = aws_ecs_cluster.main.id
   task_definition = aws_ecs_task_definition.app.arn
   desired_count   = 1
