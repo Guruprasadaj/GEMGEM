@@ -112,9 +112,11 @@ jobs:
           const { status, conclusion } = context.job
           const deploymentStatus = status === 'success' ? '✅ succeeded' : '❌ failed'
           
-          github.rest.issues.createComment({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.name,
-            body: `Deployment ${deploymentStatus}!`
-          }) 
+          if (context.issue.number) {
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.name,
+              body: `Deployment ${deploymentStatus}!`
+            })
+          } 
