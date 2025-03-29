@@ -24,29 +24,11 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v3
 
-    - name: Load environment variables from .env file
-      run: |
-        # Load .env file
-        if [ -f .env ]; then
-          echo "Loading .env file..."
-          while IFS= read -r line || [ -n "$line" ]; do
-            # Skip comments and empty lines
-            [[ $line =~ ^#.*$ ]] && continue
-            [[ -z $line ]] && continue
-            
-            # Export to GitHub environment
-            echo "$line" >> $GITHUB_ENV
-          done < .env
-        else
-          echo "No .env file found!"
-          exit 1
-        fi
-
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v1
       with:
-        aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ env.AWS_REGION }}
 
     - name: Login to Amazon ECR
@@ -73,11 +55,11 @@ jobs:
       run: terraform init
       working-directory: ./terraform
 
-    - name: Create terraform.tfvars file from .env
+    - name: Create terraform.tfvars file
       run: |
         cat > terraform.tfvars << EOF
-        db_username = "$DB_USERNAME"
-        db_password = "$DB_PASSWORD"
+        db_username = "${{ secrets.DB_USERNAME }}"
+        db_password = "${{ secrets.DB_PASSWORD }}"
         EOF
       working-directory: ./terraform
 
@@ -86,10 +68,12 @@ jobs:
       working-directory: ./terraform
 
     - name: Terraform Apply
+      if: github.ref == 'refs/heads/main'
       run: terraform apply -auto-approve
       working-directory: ./terraform
 
     - name: Force new deployment
+      if: github.ref == 'refs/heads/main'
       run: |
         aws ecs update-service --cluster $ECS_CLUSTER --service $ECS_SERVICE --force-new-deployment
 
