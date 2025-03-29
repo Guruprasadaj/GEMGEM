@@ -13,7 +13,7 @@ resource "aws_vpc" "main" {
   cidr_block           = "10.0.0.0/16"
   enable_dns_hostnames = true
   enable_dns_support   = true
-  
+
   tags = {
     Name = "${var.project_name}-vpc"
   }
@@ -128,7 +128,7 @@ resource "aws_launch_template" "ecs" {
   )
 
   vpc_security_group_ids = [aws_security_group.ecs_sg.id]
-  
+
   iam_instance_profile {
     name = aws_iam_instance_profile.ecs_profile.name
   }
@@ -138,9 +138,9 @@ resource "aws_launch_template" "ecs" {
 resource "aws_autoscaling_group" "ecs" {
   name                = "ecs-asg"
   vpc_zone_identifier = [aws_subnet.public.id]
-  min_size           = 1
-  max_size           = 1
-  desired_capacity   = 1
+  min_size            = 1
+  max_size            = 1
+  desired_capacity    = 1
 
   launch_template {
     id      = aws_launch_template.ecs.id
@@ -162,19 +162,19 @@ resource "aws_db_subnet_group" "main" {
 
 # RDS Instance
 resource "aws_db_instance" "main" {
-  identifier           = "${var.project_name}-db"
-  engine              = "mariadb"
-  engine_version      = "10.6"
-  instance_class      = "db.t3.micro"
-  allocated_storage   = 20
-  storage_type        = "gp2"
-  
-  username            = var.db_username
-  password            = var.db_password
-  
+  identifier        = "${var.project_name}-db"
+  engine            = "mariadb"
+  engine_version    = "10.6"
+  instance_class    = "db.t3.micro"
+  allocated_storage = 20
+  storage_type      = "gp2"
+
+  username = var.db_username
+  password = var.db_password
+
   vpc_security_group_ids = [aws_security_group.rds_sg.id]
   db_subnet_group_name   = aws_db_subnet_group.main.name
-  
+
   skip_final_snapshot = true
   deletion_protection = false
 }
@@ -315,7 +315,7 @@ resource "aws_ecs_service" "main" {
   desired_count   = 2
 
   deployment_minimum_healthy_percent = 50
-  deployment_maximum_percent        = 200
+  deployment_maximum_percent         = 200
 }
 
 resource "aws_s3_bucket" "static" {
