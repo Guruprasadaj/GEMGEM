@@ -156,7 +156,7 @@ resource "aws_autoscaling_group" "ecs" {
 
 # RDS Subnet Group
 resource "aws_db_subnet_group" "main" {
-  name       = "${var.project_name}-db-subnet-group"
+  name       = "gemgem-db-subnet-group-${random_string.suffix.result}"
   subnet_ids = aws_subnet.private[*].id
 }
 
@@ -181,7 +181,8 @@ resource "aws_db_instance" "main" {
 
 # S3 Bucket
 resource "aws_s3_bucket" "app_bucket" {
-  bucket = "${var.project_name}-app-bucket"
+  bucket        = "gemgem-app-bucket-${random_string.suffix.result}"
+  force_destroy = true
 }
 
 resource "aws_s3_bucket_public_access_block" "app_bucket" {
@@ -195,7 +196,7 @@ resource "aws_s3_bucket_public_access_block" "app_bucket" {
 
 # EFS File System
 resource "aws_efs_file_system" "main" {
-  creation_token = "${var.project_name}-efs"
+  creation_token = "gemgem-efs-${random_string.suffix.result}"
   encrypted      = true
 
   tags = {
@@ -257,7 +258,7 @@ resource "aws_cloudfront_distribution" "main" {
 
 # IAM Roles and Policies
 resource "aws_iam_role" "ecs_role" {
-  name = "ecs-instance-role"
+  name = "ecs-instance-role-${random_string.suffix.result}"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -309,7 +310,7 @@ resource "aws_ecs_task_definition" "main" {
 
 # ECS Service
 resource "aws_ecs_service" "main" {
-  name            = "${var.project_name}-service"
+  name            = "gemgem-service-${random_string.suffix.result}"
   cluster         = aws_ecs_cluster.main.id
   task_definition = aws_ecs_task_definition.main.arn
   desired_count   = 2
@@ -331,7 +332,7 @@ resource "random_string" "suffix" {
 
 # Create ECR Repository
 resource "aws_ecr_repository" "app" {
-  name                 = "gemgem"
+  name                 = "gemgem-${random_string.suffix.result}"
   image_tag_mutability = "MUTABLE"
 
   image_scanning_configuration {
