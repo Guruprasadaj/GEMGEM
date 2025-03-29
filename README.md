@@ -1,3 +1,2 @@
 # GEMGEM
-
-push
+AWS deployment with GitHub Actions
