@@ -13,31 +13,52 @@ data "aws_vpc" "existing" {
   id = "vpc-0f3668f84f0c7b8df"
 }
 
-# Get existing subnets with MORE SPECIFIC filters
-data "aws_subnet" "public" {
-  count = 2
+# Create our own subnets instead of trying to find existing ones
+resource "aws_subnet" "public" {
+  count                   = 2
+  vpc_id                  = data.aws_vpc.existing.id
+  cidr_block              = "10.0.${count.index + 1}.0/24"
+  availability_zone       = data.aws_availability_zones.available.names[count.index]
+  map_public_ip_on_launch = true
+  
+  tags = {
+    Name = "${var.project_name}-public-subnet-${count.index + 1}"
+  }
+}
+
+# Internet Gateway
+resource "aws_internet_gateway" "main" {
   vpc_id = data.aws_vpc.existing.id
   
-  # Add specific filter by AZ to get exactly one subnet per AZ
-  availability_zone = count.index == 0 ? "us-east-1a" : "us-east-1b"
+  tags = {
+    Name = "${var.project_name}-igw"
+  }
+}
+
+# Route Table
+resource "aws_route_table" "public" {
+  vpc_id = data.aws_vpc.existing.id
   
-  # Add filter for public subnets
-  filter {
-    name   = "map-public-ip-on-launch"
-    values = ["true"]
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.main.id
   }
   
-  # Add a filter for the subnet's position to make it more specific
-  # This assumes your subnets follow a typical naming convention
-  filter {
-    name   = "tag:Name"
-    values = ["*public*${count.index + 1}*"]
+  tags = {
+    Name = "${var.project_name}-public-route-table"
   }
+}
+
+# Route Table Association
+resource "aws_route_table_association" "public" {
+  count          = 2
+  subnet_id      = aws_subnet.public[count.index].id
+  route_table_id = aws_route_table.public.id
 }
 
 # Security Groups
 resource "aws_security_group" "ecs" {
-  name        = "gemgem-ecs"
+  name        = "${var.project_name}-ecs"
   description = "ECS security group"
   vpc_id      = data.aws_vpc.existing.id
 
@@ -152,7 +173,7 @@ resource "aws_launch_template" "ecs" {
 
 # Get subnet IDs from data source
 locals {
-  subnet_ids = [for s in data.aws_subnet.public : s.id]
+  subnet_ids = [for s in aws_subnet.public : s.id]
 }
 
 # Auto Scaling Group
