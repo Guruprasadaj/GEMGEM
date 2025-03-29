@@ -8,21 +8,30 @@ data "aws_availability_zones" "available" {
   state = "available"
 }
 
-# Use existing VPC - this is correct
+# Use existing VPC
 data "aws_vpc" "existing" {
   id = "vpc-0f3668f84f0c7b8df"
 }
 
-# Use existing subnets - this is good
+# Get existing subnets with MORE SPECIFIC filters
 data "aws_subnet" "public" {
   count = 2
+  vpc_id = data.aws_vpc.existing.id
+  
+  # Add specific filter by AZ to get exactly one subnet per AZ
+  availability_zone = count.index == 0 ? "us-east-1a" : "us-east-1b"
+  
+  # Add filter for public subnets
   filter {
-    name   = "vpc-id"
-    values = [data.aws_vpc.existing.id]
+    name   = "map-public-ip-on-launch"
+    values = ["true"]
   }
+  
+  # Add a filter for the subnet's position to make it more specific
+  # This assumes your subnets follow a typical naming convention
   filter {
-    name   = "availability-zone"
-    values = ["us-east-1${count.index == 0 ? "a" : "b"}"]
+    name   = "tag:Name"
+    values = ["*public*${count.index + 1}*"]
   }
 }
 
