@@ -378,3 +378,78 @@ resource "aws_ecr_repository_policy" "app_policy" {
     ]
   })
 }
+
+# Application Load Balancer
+resource "aws_lb" "ecs" {
+  name               = "gemgem-alb-${random_string.suffix.result}"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.alb.id]
+  subnets           = aws_subnet.public[*].id
+
+  tags = {
+    Name = "gemgem-alb"
+  }
+}
+
+# ALB Target Group
+resource "aws_lb_target_group" "ecs" {
+  name        = "gemgem-tg-${random_string.suffix.result}"
+  port        = 80
+  protocol    = "HTTP"
+  vpc_id      = data.aws_vpc.existing.id
+  target_type = "instance"
+
+  health_check {
+    enabled             = true
+    healthy_threshold   = 2
+    interval            = 30
+    matcher            = "200"
+    path               = "/"
+    port               = "traffic-port"
+    protocol           = "HTTP"
+    timeout            = 5
+    unhealthy_threshold = 2
+  }
+
+  tags = {
+    Name = "gemgem-target-group"
+  }
+}
+
+# ALB Listener
+resource "aws_lb_listener" "front_end" {
+  load_balancer_arn = aws_lb.ecs.arn
+  port              = "80"
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.ecs.arn
+  }
+}
+
+# ALB Security Group
+resource "aws_security_group" "alb" {
+  name        = "gemgem-alb-sg-${random_string.suffix.result}"
+  description = "ALB Security Group"
+  vpc_id      = data.aws_vpc.existing.id
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "gemgem-alb-sg"
+  }
+}
