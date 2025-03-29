@@ -41,12 +41,10 @@ jobs:
         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         IMAGE_TAG: ${{ github.sha }}
       run: |
-        # Build a docker container and
-        # push it to ECR so that it can
-        # be deployed to ECS.
+        # Build a docker container and push it to ECR
         docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
         docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-        echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+        echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
     - name: Setup Terraform
       uses: hashicorp/setup-terraform@v2
@@ -56,43 +54,28 @@ jobs:
     - name: Terraform Init
       run: terraform init
       working-directory: ./terraform
-      
-    - name: Check for existing resources
+
+    - name: Create terraform.tfvars file
       run: |
-        echo "Checking for existing resources..."
-        terraform state list || true
-      working-directory: ./terraform
-      
-    - name: Terraform Plan with target
-      run: |
-        terraform plan -target=aws_ecs_cluster.main -target=aws_ecs_task_definition.app
-      working-directory: ./terraform
-      
-    - name: Terraform Apply with target
-      run: |
-        terraform apply -auto-approve -target=aws_ecs_cluster.main -target=aws_ecs_task_definition.app
+        cat > terraform.tfvars << EOF
+        project_name = "gemgem"
+        db_username = "${{ secrets.DB_USERNAME }}"
+        db_password = "${{ secrets.DB_PASSWORD }}"
+        EOF
       working-directory: ./terraform
 
-    - name: Download task definition
+    - name: Terraform Plan
+      run: terraform plan -target=aws_ecs_cluster.main -target=aws_ecs_task_definition.app
+      working-directory: ./terraform
+
+    - name: Terraform Apply
+      run: terraform apply -auto-approve -target=aws_ecs_cluster.main -target=aws_ecs_task_definition.app
+      working-directory: ./terraform
+
+    - name: Update ECS service
       run: |
-        aws ecs describe-task-definition --task-definition ${{ env.ECS_TASK_DEFINITION }} \
-        --query taskDefinition > task-definition.json
-
-    - name: Fill in the new image ID in the Amazon ECS task definition
-      id: task-def
-      uses: aws-actions/amazon-ecs-render-task-definition@v1
-      with:
-        task-definition: task-definition.json
-        container-name: ${{ env.CONTAINER_NAME }}
-        image: ${{ steps.build-image.outputs.image }}
-
-    - name: Deploy Amazon ECS task definition
-      uses: aws-actions/amazon-ecs-deploy-task-definition@v1
-      with:
-        task-definition: ${{ steps.task-def.outputs.task-definition }}
-        service: ${{ env.ECS_SERVICE }}
-        cluster: ${{ env.ECS_CLUSTER }}
-        wait-for-service-stability: true
+        aws ecs update-service --cluster $ECS_CLUSTER --service $ECS_SERVICE --force-new-deployment
+      continue-on-error: true
 
     - name: Post-deployment notification
       if: always()
