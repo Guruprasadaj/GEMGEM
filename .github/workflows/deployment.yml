@@ -8,7 +8,6 @@ on:
 env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY: gemgem
-  TF_VAR_container_image: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/gemgem:${{ github.sha }}
 
 jobs:
   deploy:
@@ -37,6 +36,7 @@ jobs:
         run: |
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          echo "CONTAINER_IMAGE=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_ENV
 
       # Apply Terraform configuration
       - name: Setup Terraform
@@ -51,4 +51,5 @@ jobs:
         env:
           TF_VAR_db_username: ${{ secrets.DB_USERNAME }}
           TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+          TF_VAR_container_image: ${{ env.CONTAINER_IMAGE }}
         run: terraform apply -auto-approve 
