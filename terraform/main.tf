@@ -162,9 +162,9 @@ resource "aws_db_subnet_group" "main" {
 
 # RDS Instance
 resource "aws_db_instance" "main" {
-  identifier        = "${var.project_name}-db"
+  identifier        = "gemgem-db-${random_string.suffix.result}"
   engine            = "mariadb"
-  engine_version    = "10.6"
+  engine_version    = "10.5"
   instance_class    = "db.t3.micro"
   allocated_storage = 20
   storage_type      = "gp2"
@@ -280,7 +280,7 @@ resource "aws_iam_role_policy_attachment" "ecs_policy" {
 }
 
 resource "aws_iam_instance_profile" "ecs_profile" {
-  name = "ecs-instance-profile"
+  name = "ecs-instance-profile-${random_string.suffix.result}"
   role = aws_iam_role.ecs_role.name
 }
 
