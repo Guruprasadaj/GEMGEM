@@ -3,426 +3,100 @@ provider "aws" {
   region = var.aws_region
 }
 
-# Use existing VPC
+# Reference all existing resources instead of creating them
 data "aws_vpc" "existing" {
-  id = "vpc-0f3668f84f0c7b8df"
+  id = "vpc-0f3668f84f0c7b8df"  # Your existing VPC
 }
 
-# Find ALL existing subnets in the VPC
-data "aws_subnets" "existing" {
-  filter {
-    name   = "vpc-id"
-    values = [data.aws_vpc.existing.id]
-  }
+data "aws_ecs_cluster" "main" {
+  cluster_name = "gemgem-cluster"  # Your existing cluster
 }
 
-# Get subnet details
-data "aws_subnet" "selected" {
-  for_each = toset(slice(data.aws_subnets.existing.ids, 0, 2))
-  id       = each.value
+data "aws_db_instance" "main" {
+  db_instance_identifier = "gemgem-db"  # Your existing RDS instance
 }
 
-# Use existing security group or create if it doesn't exist
-resource "aws_security_group" "ecs" {
-  name        = "${var.project_name}-ecs-new"  # Changed name to avoid conflict
-  description = "ECS security group"
-  vpc_id      = data.aws_vpc.existing.id
-
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+data "aws_iam_role" "ecs_task_execution_role" {
+  name = "ecsTaskExecutionRole"  # AWS-managed role
 }
 
-# RDS Security Group
-resource "aws_security_group" "rds_sg" {
-  name        = "${var.project_name}-rds-sg-new"  # Changed name to avoid conflict
-  description = "Security group for RDS"
-  vpc_id      = data.aws_vpc.existing.id
-
-  ingress {
-    from_port       = 3306
-    to_port         = 3306
-    protocol        = "tcp"
-    security_groups = [aws_security_group.ecs.id]
-  }
-  
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-}
-
-# EFS Security Group
-resource "aws_security_group" "efs_sg" {
-  name        = "${var.project_name}-efs-sg-new"  # Changed name to avoid conflict
-  description = "Security group for EFS"
-  vpc_id      = data.aws_vpc.existing.id
-
-  ingress {
-    from_port       = 2049
-    to_port         = 2049
-    protocol        = "tcp"
-    security_groups = [aws_security_group.ecs.id]
-  }
-  
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-}
-
-# Use local variable to get subnet IDs in a usable format
-locals {
-  subnet_ids = [for s in data.aws_subnet.selected : s.id]
-}
-
-# ECS Cluster
-resource "aws_ecs_cluster" "main" {
-  name = "gemgem-cluster"
-}
-
-# IAM Roles and Policies
-resource "aws_iam_role" "ecs_role" {
-  name = "ecs-instance-role-${random_string.suffix.result}"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "ec2.amazonaws.com"
-        }
-      }
-    ]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "ecs_policy" {
-  role       = aws_iam_role.ecs_role.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role"
-}
-
-resource "aws_iam_instance_profile" "ecs_profile" {
-  name = "ecs-instance-profile-${random_string.suffix.result}"
-  role = aws_iam_role.ecs_role.name
-}
-
-# ECS Launch Template
-resource "aws_launch_template" "ecs" {
-  name_prefix   = "ecs-template"
-  image_id      = var.ecs_ami_id
-  instance_type = var.instance_type
-
-  user_data = base64encode(<<-EOF
-              #!/bin/bash
-              echo ECS_CLUSTER=${aws_ecs_cluster.main.name} >> /etc/ecs/ecs.config
-              EOF
-  )
-
-  vpc_security_group_ids = [aws_security_group.ecs.id]
-
-  iam_instance_profile {
-    name = aws_iam_instance_profile.ecs_profile.name
-  }
-}
-
-# Auto Scaling Group
-resource "aws_autoscaling_group" "ecs" {
-  name                = "gemgem-asg-${random_string.suffix.result}"
-  vpc_zone_identifier = local.subnet_ids
-  target_group_arns   = [aws_lb_target_group.ecs.arn]
-  health_check_type   = "EC2"
-  min_size            = 1
-  max_size            = 4
-  desired_capacity    = 2
-
-  launch_template {
-    id      = aws_launch_template.ecs.id
-    version = "$Latest"
-  }
-
-  tag {
-    key                 = "Name"
-    value               = "gemgem-ecs-instance"
-    propagate_at_launch = true
-  }
-}
-
-# ALB Security Group
-resource "aws_security_group" "alb" {
-  name        = "gemgem-alb-sg-${random_string.suffix.result}"
-  description = "ALB Security Group"
-  vpc_id      = data.aws_vpc.existing.id
-
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-}
-
-# Application Load Balancer
-resource "aws_lb" "ecs" {
-  name               = "gemgem-alb-${random_string.suffix.result}"
-  internal           = false
-  load_balancer_type = "application"
-  security_groups    = [aws_security_group.alb.id]
-  subnets            = local.subnet_ids
-}
-
-# ALB Target Group
-resource "aws_lb_target_group" "ecs" {
-  name        = "gemgem-tg-${random_string.suffix.result}"
-  port        = 80
-  protocol    = "HTTP"
-  vpc_id      = data.aws_vpc.existing.id
-  target_type = "instance"
-
-  health_check {
-    enabled             = true
-    healthy_threshold   = 2
-    interval            = 30
-    matcher             = "200"
-    path                = "/"
-    port                = "traffic-port"
-    protocol            = "HTTP"
-    timeout             = 5
-    unhealthy_threshold = 2
-  }
-}
-
-# ALB Listener
-resource "aws_lb_listener" "front_end" {
-  load_balancer_arn = aws_lb.ecs.arn
-  port              = "80"
-  protocol          = "HTTP"
-
-  default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.ecs.arn
-  }
-}
-
-# S3 Bucket for static files
-resource "aws_s3_bucket" "app_bucket" {
-  bucket        = "gemgem-app-bucket-${random_string.suffix.result}"
-  force_destroy = true
-}
-
-resource "aws_s3_bucket_public_access_block" "app_bucket" {
-  bucket = aws_s3_bucket.app_bucket.id
-
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
-}
-
-# RDS Subnet Group
-resource "aws_db_subnet_group" "main" {
-  name       = "gemgem-db-subnet-group-${random_string.suffix.result}"
-  subnet_ids = local.subnet_ids
-}
-
-# RDS Instance - MariaDB
-resource "aws_db_instance" "main" {
-  identifier        = "gemgem-db-${random_string.suffix.result}"
-  engine            = "mariadb"
-  engine_version    = "10.5"
-  instance_class    = "db.t3.micro"
-  allocated_storage = 20
-  storage_type      = "gp2"
-
-  username = var.db_username
-  password = var.db_password
-
-  vpc_security_group_ids = [aws_security_group.rds_sg.id]
-  db_subnet_group_name   = aws_db_subnet_group.main.name
-
-  skip_final_snapshot = true
-  deletion_protection = false
-}
-
-# EFS File System
-resource "aws_efs_file_system" "main" {
-  creation_token = "gemgem-efs-${random_string.suffix.result}"
-  encrypted      = true
-
-  tags = {
-    Name = "${var.project_name}-efs"
-  }
-}
-
-# EFS Mount Targets
-resource "aws_efs_mount_target" "main" {
-  count           = length(local.subnet_ids)
-  file_system_id  = aws_efs_file_system.main.id
-  subnet_id       = local.subnet_ids[count.index]
-  security_groups = [aws_security_group.efs_sg.id]
-}
-
-# CloudFront Origin Access Identity
-resource "aws_cloudfront_origin_access_identity" "main" {
-  comment = "OAI for ${var.project_name}"
-}
-
-# CloudFront Distribution
-resource "aws_cloudfront_distribution" "main" {
-  enabled             = true
-  default_root_object = "index.html"
-
-  origin {
-    domain_name = aws_s3_bucket.app_bucket.bucket_regional_domain_name
-    origin_id   = "S3Origin"
-
-    s3_origin_config {
-      origin_access_identity = aws_cloudfront_origin_access_identity.main.cloudfront_access_identity_path
-    }
-  }
-
-  default_cache_behavior {
-    allowed_methods        = ["GET", "HEAD"]
-    cached_methods         = ["GET", "HEAD"]
-    target_origin_id       = "S3Origin"
-    viewer_protocol_policy = "redirect-to-https"
-
-    forwarded_values {
-      query_string = false
-      cookies {
-        forward = "none"
-      }
-    }
-  }
-
-  restrictions {
-    geo_restriction {
-      restriction_type = "none"
-    }
-  }
-
-  viewer_certificate {
-    cloudfront_default_certificate = true
-  }
-}
-
-# S3 bucket policy for CloudFront
-resource "aws_s3_bucket_policy" "app_bucket_policy" {
-  bucket = aws_s3_bucket.app_bucket.id
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action   = "s3:GetObject"
-        Effect   = "Allow"
-        Resource = "${aws_s3_bucket.app_bucket.arn}/*"
-        Principal = {
-          AWS = aws_cloudfront_origin_access_identity.main.iam_arn
-        }
-      }
-    ]
-  })
-}
-
-# ECS Task Definition - EC2 launch type
+# Create a new task definition version - this is the main thing we want to update
 resource "aws_ecs_task_definition" "app" {
-  family                   = "gemgem-app"
-  requires_compatibilities = ["EC2"] # FIX: Use EC2 launch type, not FARGATE
-  network_mode             = "bridge" # FIX: EC2 instances use bridge networking
-
-  # Add volume for EFS
-  volume {
-    name = "efs-storage"
-    efs_volume_configuration {
-      file_system_id = aws_efs_file_system.main.id
-      root_directory = "/"
-    }
-  }
-
+  family                   = "gemgem-task"
+  network_mode             = "bridge"
+  requires_compatibilities = ["EC2"]
+  execution_role_arn       = data.aws_iam_role.ecs_task_execution_role.arn
+  
   container_definitions = jsonencode([
     {
       name      = "gemgem-container"
-      image     = "${data.aws_ecr_repository.app.repository_url}:latest"
-      cpu       = 256
-      memory    = 512
+      image     = var.container_image
       essential = true
+      
       portMappings = [
         {
           containerPort = 80
-          hostPort      = 80
+          hostPort      = 0
+          protocol      = "tcp"
         }
       ]
+      
       environment = [
-        {
-          name  = "DB_HOST", 
-          value = aws_db_instance.main.address
-        },
-        {
-          name  = "DB_USER",
-          value = var.db_username
-        },
-        {
-          name  = "DB_PASSWORD",
-          value = var.db_password
-        }
+        { name = "DB_HOST", value = data.aws_db_instance.main.address },
+        { name = "DB_NAME", value = "gemgemdb" },
+        { name = "DB_USER", value = var.db_username },
+        { name = "DB_PASSWORD", value = var.db_password }
       ]
-      mountPoints = [
-        {
-          sourceVolume  = "efs-storage",
-          containerPath = "/mnt/efs"
+      
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = "/ecs/gemgem"
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "ecs"
         }
-      ]
+      }
     }
   ])
 }
 
-# ECS Service with EC2 launch type
+# Update the main service with the new task definition
 resource "aws_ecs_service" "main" {
-  name            = "gemgem-service"
-  cluster         = aws_ecs_cluster.main.id
+  name            = "gemgem-service"  # Your existing service
+  cluster         = data.aws_ecs_cluster.main.id
   task_definition = aws_ecs_task_definition.app.arn
-  desired_count   = 1
-  launch_type     = "EC2" # FIX: Use EC2 launch type
+  desired_count   = 2  # Match your current desired count
   
-  # Use load balancer
+  # Force new deployment to use the new task definition
+  force_new_deployment = true
+  
+  # Keep existing load balancer configuration
   load_balancer {
-    target_group_arn = aws_lb_target_group.ecs.arn
+    target_group_arn = "arn:aws:elasticloadbalancing:us-east-1:851725283026:targetgroup/gemgem-tg/abcdef1234567"  # Replace with actual ARN
     container_name   = "gemgem-container"
     container_port   = 80
   }
+  
+  # Ignore changes to task_definition when updating
+  lifecycle {
+    ignore_changes = [task_definition]
+  }
 }
 
-# Use existing ECR repository
-data "aws_ecr_repository" "app" {
-  name = "gemgem"
+# Variables
+variable "aws_region" {
+  default = "us-east-1"
 }
 
-# Random string for uniqueness
-resource "random_string" "suffix" {
-  length  = 8
-  special = false
-  upper   = false
+variable "db_username" {
+  description = "Username for the RDS instance"
+}
+
+variable "db_password" {
+  description = "Password for the RDS instance"
+}
+
+variable "container_image" {
+  description = "Container image to deploy"
+  default     = "851725283026.dkr.ecr.us-east-1.amazonaws.com/gemgem:latest"
 }
