@@ -14,10 +14,25 @@ data "aws_vpc" "existing" {
 }
 
 # Use existing subnets
-data "aws_subnets" "existing" {
+data "aws_subnets" "public" {
   filter {
     name   = "vpc-id"
     values = [data.aws_vpc.existing.id]
+  }
+  filter {
+    name   = "map-public-ip-on-launch"
+    values = ["true"]
+  }
+}
+
+data "aws_subnets" "private" {
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.existing.id]
+  }
+  filter {
+    name   = "map-public-ip-on-launch"
+    values = ["false"]
   }
 }
 
@@ -303,18 +318,18 @@ resource "aws_ecs_task_definition" "app" {
   family                   = "gemgem"
   requires_compatibilities = ["EC2"]
   network_mode            = "bridge"
-  
+
   container_definitions = jsonencode([
     {
       name      = "gemgem"
-      image     = "${aws_ecr_repository.app.repository_url}:latest"
+      image     = "${data.aws_ecr_repository.app.repository_url}:latest"
       cpu       = 256
       memory    = 512
       essential = true
       portMappings = [
         {
           containerPort = 80
-          hostPort      = 80
+          hostPort     = 80
         }
       ]
     }
@@ -340,17 +355,15 @@ resource "random_string" "suffix" {
   upper   = false
 }
 
-# Create ECR Repository
-resource "aws_ecr_repository" "app" {
-  name         = "gemgem"
-  force_delete = true
+# Use existing ECR repository
+data "aws_ecr_repository" "app" {
+  name = "gemgem"
 }
 
-# Add ECR Repository Policy
+# ECR Repository Policy
 resource "aws_ecr_repository_policy" "app_policy" {
-  repository = aws_ecr_repository.app.name
-
-  policy = jsonencode({
+  repository = data.aws_ecr_repository.app.name
+  policy     = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
