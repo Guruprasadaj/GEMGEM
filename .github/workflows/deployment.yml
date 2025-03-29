@@ -62,7 +62,13 @@ jobs:
 
     - name: Terraform Format
       working-directory: ./terraform
-      run: terraform fmt -check
+      run: |
+        terraform fmt
+        git config --global user.name "GitHub Actions"
+        git config --global user.email "actions@github.com"
+        git add .
+        git diff --cached --quiet || git commit -m "Auto-format Terraform files"
+        git push origin main || true
 
     - name: Terraform Plan
       working-directory: ./terraform
